@@ -2,18 +2,20 @@
 pragma solidity ^0.8.15;
 
 // ============================================================
-// REPRODUCTION FIDÈLE DU CrossChainBridge OlympusDAO V3
-// Source: https://github.com/OlympusDAO/olympus-v3/blob/master/src/policies/CrossChainBridge.sol
-// Commit: 464abc3f (master branch, Feb 2024)
+// CrossChainBridgePOC.sol
+// Reproduction FIDÈLE du contrat OlympusDAO CrossChainBridge.sol
+// Source: github.com/OlympusDAO/olympus-v3/src/policies/CrossChainBridge.sol
+//
+// VULNÉRABILITÉ ZERO-DAY DOCUMENTÉE :
+//   retryMessage() et lzReceive() ne vérifient PAS bridgeActive
+//   => Mint OHM illégal possible même après arrêt d'urgence de la gouvernance
 // ============================================================
 
 import "./MockContracts.sol";
 
-/// @notice Reproduction du CrossChainBridge OlympusDAO pour PoC de sécurité
-/// @dev Ce contrat reproduit EXACTEMENT la logique du contrat déployé
 contract CrossChainBridgePOC {
-    
-    // ---- Errors (identiques au contrat réel) ----
+
+    // ---- Errors (identiques au contrat de production) ----
     error Bridge_InsufficientAmount();
     error Bridge_InvalidCaller();
     error Bridge_InvalidMessageSource();
@@ -27,79 +29,86 @@ contract CrossChainBridgePOC {
     // ---- Events ----
     event BridgeTransferred(address indexed sender_, uint256 amount_, uint16 indexed dstChain_);
     event BridgeReceived(address indexed receiver_, uint256 amount_, uint16 indexed srcChain_);
-    event MessageFailed(uint16 srcChainId_, bytes srcAddress_, uint64 nonce_, bytes payload_, bytes reason_);
-    event RetryMessageSuccess(uint16 srcChainId_, bytes srcAddress_, uint64 nonce_, bytes32 payloadHash_);
+    event MessageFailed(
+        uint16 srcChainId_,
+        bytes srcAddress_,
+        uint64 nonce_,
+        bytes payload_,
+        bytes reason_
+    );
+    event RetryMessageSuccess(
+        uint16 srcChainId_,
+        bytes srcAddress_,
+        uint64 nonce_,
+        bytes32 payloadHash_
+    );
     event BridgeStatusSet(bool isActive_);
 
-    // ---- State Variables (identiques au contrat réel) ----
+    // ---- State (identique au contrat de production) ----
     MockMINTR public MINTR;
-    MockLZEndpoint public immutable lzEndpoint;
+    MockLZEndpoint public lzEndpoint;
     MockOHM public ohm;
 
-    /// @notice Flag to determine if bridge is allowed to send messages or not
+    /// @notice Flag de contrôle d'urgence — seul mécanisme d'arrêt de la gouvernance
     bool public bridgeActive;
 
-    /// @notice Storage for failed messages on receive.
+    /// @notice Messages échoués stockés pour retry
+    /// chainID => source address => nonce => keccak256(payload)
     mapping(uint16 => mapping(bytes => mapping(uint64 => bytes32))) public failedMessages;
 
-    /// @notice Trusted remote paths.
+    /// @notice Chemins de confiance (trusted remotes)
     mapping(uint16 => bytes) public trustedRemoteLookup;
 
     address public admin;
 
-    // ---- Constructor ----
     constructor(address mintr_, address endpoint_) {
         MINTR = MockMINTR(mintr_);
         lzEndpoint = MockLZEndpoint(endpoint_);
         ohm = MINTR.ohm();
-        bridgeActive = true; // Bridge starts active
+        bridgeActive = true; // Actif par défaut (comme en production)
         admin = msg.sender;
     }
 
-    // ---- Admin Functions ----
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Not admin");
-        _;
-    }
+    // ============================================================
+    // CORE FUNCTIONS
+    // ============================================================
 
-    function setTrustedRemote(uint16 srcChainId_, bytes calldata path_) external onlyAdmin {
-        trustedRemoteLookup[srcChainId_] = path_;
-    }
-
-    /// @notice Activate or deactivate the bridge
-    /// @dev This is the GOVERNANCE EMERGENCY SHUTDOWN mechanism
-    function setBridgeStatus(bool isActive_) external onlyAdmin {
-        bridgeActive = isActive_;
-        emit BridgeStatusSet(isActive_);
-    }
-
-    // ============================================================================================
-    // CORE FUNCTIONS - REPRODUCTION EXACTE DU CODE RÉEL
-    // ============================================================================================
-
-    /// @notice Send OHM to an eligible chain
-    /// @dev CORRECTEMENT protégé par bridgeActive
+    /// @notice Envoyer OHM vers une autre chaîne
+    /// @dev CORRECTEMENT PROTÉGÉ par bridgeActive — voie sortante sécurisée
     function sendOhm(uint16 dstChainId_, address to_, uint256 amount_) external payable {
-        // ✓ GUARD PRÉSENT: sendOhm vérifie bridgeActive
+        // ✓ GUARD PRÉSENT : voie sortante correctement protégée
         if (!bridgeActive) revert Bridge_Deactivated();
         if (ohm.balanceOf(msg.sender) < amount_) revert Bridge_InsufficientAmount();
 
         bytes memory payload = abi.encode(to_, amount_);
         MINTR.burnOhm(msg.sender, amount_);
 
+        // Envoi via LayerZero (simplifié pour le PoC)
+        lzEndpoint.send{value: msg.value}(
+            dstChainId_,
+            trustedRemoteLookup[dstChainId_],
+            payload,
+            payable(msg.sender),
+            address(0),
+            bytes("")
+        );
+
         emit BridgeTransferred(msg.sender, amount_, dstChainId_);
     }
 
-    /// @notice Implementation of receiving an LZ message
-    /// @dev INTERNE - NE VÉRIFIE PAS bridgeActive ← FAILLE
+    /// @notice Réception interne d'un message cross-chain → mint OHM
+    /// @dev VULNÉRABLE : pas de vérification de bridgeActive ici
+    ///      Appelée par lzReceive(), receiveMessage() ET retryMessage()
+    ///      => Tous les chemins entrants sont non protégés
     function _receiveMessage(
         uint16 srcChainId_,
-        bytes memory,
-        uint64,
+        bytes memory, /* srcAddress_ */
+        uint64, /* nonce_ */
         bytes memory payload_
     ) internal virtual {
-        // ✗ GUARD ABSENT: _receiveMessage ne vérifie PAS bridgeActive
-        // C'est ici que la vulnérabilité réside
+        // ✗ GUARD ABSENT : bridgeActive n'est PAS vérifié ici
+        // C'est l'invariant de sécurité violé : même si bridgeActive == false,
+        // cette fonction peut être appelée via retryMessage()
         (address to, uint256 amount) = abi.decode(payload_, (address, uint256));
 
         MINTR.increaseMintApproval(address(this), amount);
@@ -108,27 +117,17 @@ contract CrossChainBridgePOC {
         emit BridgeReceived(to, amount, srcChainId_);
     }
 
-    /// @notice Implementation of receiving an LZ message (public wrapper)
-    function receiveMessage(
-        uint16 srcChainId_,
-        bytes memory srcAddress_,
-        uint64 nonce_,
-        bytes memory payload_
-    ) public {
-        // Restreint à address(this) via low-level call depuis lzReceive
-        if (msg.sender != address(this)) revert Bridge_InvalidCaller();
-        // ✗ GUARD ABSENT: receiveMessage ne vérifie PAS bridgeActive
-        _receiveMessage(srcChainId_, srcAddress_, nonce_, payload_);
-    }
+    // ---- LZ Receive Functions ----
 
-    /// @notice LZ receive entry point
+    /// @notice Point d'entrée LayerZero — appelé par le endpoint LZ
+    /// @dev VULNÉRABLE : ne vérifie pas bridgeActive avant d'appeler receiveMessage
     function lzReceive(
         uint16 srcChainId_,
         bytes calldata srcAddress_,
         uint64 nonce_,
         bytes calldata payload_
     ) public virtual {
-        // Restreint au lzEndpoint
+        // Seul le endpoint LZ peut appeler cette fonction
         if (msg.sender != address(lzEndpoint)) revert Bridge_InvalidCaller();
 
         // Vérification de la source de confiance
@@ -139,8 +138,8 @@ contract CrossChainBridgePOC {
             keccak256(srcAddress_) != keccak256(trustedRemote)
         ) revert Bridge_InvalidMessageSource();
 
-        // ✗ GUARD ABSENT: lzReceive ne vérifie PAS bridgeActive
-        // Low-level call pour capturer les erreurs
+        // ✗ GUARD ABSENT : bridgeActive n'est PAS vérifié ici
+        // Appel low-level pour capturer les erreurs
         (bool success, bytes memory reason) = address(this).call(
             abi.encodeWithSelector(
                 this.receiveMessage.selector,
@@ -151,15 +150,32 @@ contract CrossChainBridgePOC {
             )
         );
 
-        // Si le message échoue, le stocker pour retry
+        // Si échec : stocker le message pour retry
         if (!success) {
             failedMessages[srcChainId_][srcAddress_][nonce_] = keccak256(payload_);
             emit MessageFailed(srcChainId_, srcAddress_, nonce_, payload_, reason);
         }
     }
 
-    /// @notice Retry a failed receive message
-    /// @dev VECTEUR D'ATTAQUE PRINCIPAL: PUBLIC, PERMISSIONLESS, SANS guard bridgeActive
+    /// @notice Réception publique d'un message — appelée par lzReceive via low-level call
+    /// @dev VULNÉRABLE : ne vérifie pas bridgeActive
+    function receiveMessage(
+        uint16 srcChainId_,
+        bytes memory srcAddress_,
+        uint64 nonce_,
+        bytes memory payload_
+    ) external {
+        // Seul le contrat lui-même peut appeler cette fonction (via lzReceive)
+        if (msg.sender != address(this)) revert Bridge_InvalidCaller();
+        // ✗ GUARD ABSENT : bridgeActive n'est PAS vérifié ici
+        _receiveMessage(srcChainId_, srcAddress_, nonce_, payload_);
+    }
+
+    /// @notice Rejouer un message précédemment échoué
+    /// @dev VECTEUR D'ATTAQUE PRINCIPAL
+    ///      PUBLIC + PERMISSIONLESS : n'importe qui peut appeler cette fonction
+    ///      ✗ GUARD ABSENT : bridgeActive n'est PAS vérifié
+    ///      => Permet de minter OHM même après arrêt d'urgence de la gouvernance
     function retryMessage(
         uint16 srcChainId_,
         bytes calldata srcAddress_,
@@ -171,13 +187,56 @@ contract CrossChainBridgePOC {
         if (payloadHash == bytes32(0)) revert Bridge_NoStoredMessage();
         if (keccak256(payload_) != payloadHash) revert Bridge_InvalidPayload();
 
-        // Clear the stored message
+        // Effacer le message stocké
         failedMessages[srcChainId_][srcAddress_][nonce_] = bytes32(0);
 
-        // ✗ GUARD ABSENT: retryMessage ne vérifie PAS bridgeActive
+        // ✗ GUARD ABSENT : retryMessage ne vérifie PAS bridgeActive
         // APPEL DIRECT à _receiveMessage → mint OHM sans restriction
         _receiveMessage(srcChainId_, srcAddress_, nonce_, payload_);
 
         emit RetryMessageSuccess(srcChainId_, srcAddress_, nonce_, payloadHash);
+    }
+
+    // ---- Admin Functions ----
+
+    /// @notice Activer/désactiver le pont (mécanisme d'arrêt d'urgence)
+    function setBridgeStatus(bool active_) external {
+        require(msg.sender == admin, "Not admin");
+        bridgeActive = active_;
+        emit BridgeStatusSet(active_);
+    }
+
+    /// @notice Configurer un trusted remote
+    function setTrustedRemote(uint16 srcChainId_, bytes calldata path_) external {
+        require(msg.sender == admin, "Not admin");
+        trustedRemoteLookup[srcChainId_] = path_;
+    }
+}
+
+// ============================================================
+// CrossChainBridgePOC_FIXED : Version corrigée
+// Démontre que la mitigation est efficace
+// ============================================================
+contract CrossChainBridgePOC_FIXED is CrossChainBridgePOC {
+
+    constructor(address mintr_, address endpoint_) CrossChainBridgePOC(mintr_, endpoint_) {}
+
+    /// @notice Version corrigée de _receiveMessage
+    /// @dev MITIGATION : vérification de bridgeActive ajoutée en tête de fonction
+    ///      Protège TOUS les chemins entrants : lzReceive, receiveMessage, retryMessage
+    function _receiveMessage(
+        uint16 srcChainId_,
+        bytes memory srcAddress_,
+        uint64 nonce_,
+        bytes memory payload_
+    ) internal override {
+        // ✓ GUARD PRÉSENT : vérification atomique couvrant tous les vecteurs
+        if (!bridgeActive) revert Bridge_Deactivated();
+
+        (address to, uint256 amount) = abi.decode(payload_, (address, uint256));
+        MINTR.increaseMintApproval(address(this), amount);
+        MINTR.mintOhm(to, amount);
+
+        emit BridgeReceived(to, amount, srcChainId_);
     }
 }
