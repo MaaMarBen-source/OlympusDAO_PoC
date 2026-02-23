@@ -1,0 +1,51 @@
+Compiling 3 files with Solc 0.8.15
+Solc 0.8.15 finished in 3.20s
+Compiler run successful with warnings:
+Warning (3628): This contract has a payable fallback function, but no receive ether function. Consider adding a receive ether function.
+  --> test/CrossChainBridge_POC.t.sol:12:1:
+   |
+12 | contract MaliciousReceiver {
+   | ^ (Relevant source part starts here and spans across multiple lines).
+Note: The payable fallback function is defined here.
+  --> test/CrossChainBridge_POC.t.sol:15:5:
+   |
+15 |     fallback() external payable {
+   |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> src/CrossChainBridgePOC.sol:229:9:
+    |
+229 |         bytes memory srcAddress_,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> src/CrossChainBridgePOC.sol:230:9:
+    |
+230 |         uint64 nonce_,
+    |         ^^^^^^^^^^^^^
+
+Warning (2018): Function state mutability can be restricted to pure
+  --> test/CrossChainBridge_POC.t.sol:82:5:
+   |
+82 |     function test_5_MATH_BackingDilution_Proof() public {
+   |     ^ (Relevant source part starts here and spans across multiple lines).
+
+
+Ran 1 test for test/CrossChainBridge_POC.t.sol:CrossChainBridgePOCTest
+[PASS] test_8_REACHABILITY_Permissionless_Failure_Generation() (gas: 202439)
+Logs:
+  =================================================================
+    OLYMPUSDAO CROSSCHAINBRIDGE - ZERO-DAY PoC
+  =================================================================
+  
+[TEST 8] REACHABILITY : Creation permissionless de l'etat vulnerable
+  [ETAPE 1] Attaquant deploie MaliciousReceiver a : 0x5991A2dF15A8F6A256D3Ec51E99254Cd3fb576A9
+  [ETAPE 2] Message cross-chain arrive vers le recepteur malveillant
+  [ETAPE 3] Message CORRECTEMENT insere dans failedMessages suite au revert
+  [ETAPE 4] Attaquant peut desormais exploiter via retryMessage() a tout moment
+  
+[CONCLUSION TEST 8] REACHABILITY PROUVEE.
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 1.10ms (291.70µs CPU time)
+
+Ran 1 test suite in 11.83ms (1.10ms CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)
