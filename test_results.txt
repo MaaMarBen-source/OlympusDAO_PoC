@@ -1,0 +1,200 @@
+No files changed, compilation skipped
+
+Ran 5 tests for test/CrossChainBridge_POC.t.sol:CrossChainBridgePOCTest
+[PASS] test_1_SendOhm_CorrectlyBlocked_WhenBridgeDeactivated() (gas: 89460)
+Logs:
+  === SETUP COMPLETE ===
+  Bridge address: 0xfF9FA8f363F78f9F5658971A4F357ad95130D1F5
+  OHM address: 0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f
+  Bridge active: true
+  OHM total supply: 100000000000
+  
+=== TEST 1: sendOhm correctly blocked after deactivation ===
+  [PASS] sendOhm correctly blocked by bridgeActive = false
+         Guard works for OUTBOUND path
+
+[PASS] test_2_CRITICAL_RetryMessage_Bypasses_BridgeActive() (gas: 280711)
+Logs:
+  === SETUP COMPLETE ===
+  Bridge address: 0xfF9FA8f363F78f9F5658971A4F357ad95130D1F5
+  OHM address: 0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f
+  Bridge active: true
+  OHM total supply: 100000000000
+  
+=== TEST 2: CRITICAL EXPLOIT - retryMessage bypasses bridgeActive ===
+  [STEP 1] Failed message injected into failedMessages
+           payloadHash stored: TRUE
+           Target: attacker receives 1000000 OHM
+  [STEP 2] Governance deactivated bridge (bridgeActive = false)
+           OHM supply before attack: 100 OHM
+           sendOhm() is now blocked - governance believes bridge is safe
+  [STEP 3] Attacker calls retryMessage() - PERMISSIONLESS...
+  
+=== EXPLOIT RESULT ===
+  OHM supply before: 100 OHM
+  OHM supply after: 1000100 OHM
+  OHM illegally minted: 1000000 OHM
+  Attacker balance: 1000000 OHM
+  Bridge still deactivated: true
+  
+[CRITICAL] EXPLOIT CONFIRMED: OHM minted despite bridgeActive = false
+  [CRITICAL] Invariant violated: NOT(bridgeActive) => NOT(mint) is FALSE
+
+[PASS] test_3_CRITICAL_MultipleRetryMessages_MultipleUnauthorizedMints() (gas: 631903)
+Logs:
+  === SETUP COMPLETE ===
+  Bridge address: 0xfF9FA8f363F78f9F5658971A4F357ad95130D1F5
+  OHM address: 0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f
+  Bridge active: true
+  OHM total supply: 100000000000
+  
+=== TEST 3: Multi-message attack - N stored messages = N unauthorized mints ===
+  Pre-positioned messages: 5
+  Bridge deactivated. OHM supply before: 100 OHM
+  OHM supply after: 500100 OHM
+  Total OHM illegally minted: 500000 OHM
+  Formula: N * mintPerMessage = 500000 OHM
+  
+[MATH PROOF] Impact = N x amount_per_message
+  [MATH PROOF] With N pre-positioned messages, attack is unstoppable
+
+[PASS] test_4_MITIGATION_BridgeActiveCheck_In_ReceiveMessage() (gas: 1526950)
+Logs:
+  === SETUP COMPLETE ===
+  Bridge address: 0xfF9FA8f363F78f9F5658971A4F357ad95130D1F5
+  OHM address: 0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f
+  Bridge active: true
+  OHM total supply: 100000000000
+  
+=== TEST 4: Mitigation verification ===
+  [PASS] Fixed bridge blocks retryMessage when bridgeActive = false
+         No OHM illegally minted
+         Fix: add 'if (!bridgeActive) revert Bridge_Deactivated();'
+         in _receiveMessage() to cover ALL execution paths
+
+[PASS] test_5_MATH_BackingDilution_Proof() (gas: 52093)
+Logs:
+  === SETUP COMPLETE ===
+  Bridge address: 0xfF9FA8f363F78f9F5658971A4F357ad95130D1F5
+  OHM address: 0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f
+  Bridge active: true
+  OHM total supply: 100000000000
+  
+=== TEST 5: Mathematical proof - OHM backing dilution ===
+  --- Initial state ---
+  OHM supply: 17000000 OHM
+  Treasury: 50000000 USD
+  Backing per OHM (scaled): 2941176470588235294
+  
+--- After attack (illegal mint of 10M OHM) ---
+  OHM supply: 27000000 OHM
+  Treasury: 50000000 USD (unchanged)
+  Backing per OHM (scaled): 1851851851851851851
+  
+--- Impact ---
+  Backing dilution: 37 %
+  
+[MATH PROOF VERIFIED]
+  dilution = illegalMint / (S0 + illegalMint)
+  With illegalMint >> S0: dilution -> 100%
+
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 2.17ms (2.57ms CPU time)
+
+╭-----------------------------------------------+-----------------+-------+--------+-------+---------╮
+| src/MockContracts.sol:MockLZEndpoint Contract |                 |       |        |       |         |
++====================================================================================================+
+| Deployment Cost                               | Deployment Size |       |        |       |         |
+|-----------------------------------------------+-----------------+-------+--------+-------+---------|
+| 520564                                        | 2198            |       |        |       |         |
+|-----------------------------------------------+-----------------+-------+--------+-------+---------|
+|                                               |                 |       |        |       |         |
+|-----------------------------------------------+-----------------+-------+--------+-------+---------|
+| Function Name                                 | Min             | Avg   | Median | Max   | # Calls |
+|-----------------------------------------------+-----------------+-------+--------+-------+---------|
+| setBridge                                     | 43885           | 43885 | 43885  | 43885 | 5       |
+╰-----------------------------------------------+-----------------+-------+--------+-------+---------╯
+
+╭------------------------------------------+-----------------+------+--------+------+---------╮
+| src/MockContracts.sol:MockMINTR Contract |                 |      |        |      |         |
++=============================================================================================+
+| Deployment Cost                          | Deployment Size |      |        |      |         |
+|------------------------------------------+-----------------+------+--------+------+---------|
+| 309506                                   | 1253            |      |        |      |         |
+|------------------------------------------+-----------------+------+--------+------+---------|
+|                                          |                 |      |        |      |         |
+|------------------------------------------+-----------------+------+--------+------+---------|
+| Function Name                            | Min             | Avg  | Median | Max  | # Calls |
+|------------------------------------------+-----------------+------+--------+------+---------|
+| ohm                                      | 2304            | 2304 | 2304   | 2304 | 6       |
+╰------------------------------------------+-----------------+------+--------+------+---------╯
+
+╭----------------------------------------+-----------------+-------+--------+-------+---------╮
+| src/MockContracts.sol:MockOHM Contract |                 |       |        |       |         |
++=============================================================================================+
+| Deployment Cost                        | Deployment Size |       |        |       |         |
+|----------------------------------------+-----------------+-------+--------+-------+---------|
+| 589480                                 | 2616            |       |        |       |         |
+|----------------------------------------+-----------------+-------+--------+-------+---------|
+|                                        |                 |       |        |       |         |
+|----------------------------------------+-----------------+-------+--------+-------+---------|
+| Function Name                          | Min             | Avg   | Median | Max   | # Calls |
+|----------------------------------------+-----------------+-------+--------+-------+---------|
+| approve                                | 46466           | 46466 | 46466  | 46466 | 5       |
+|----------------------------------------+-----------------+-------+--------+-------+---------|
+| balanceOf                              | 2541            | 2541  | 2541   | 2541  | 1       |
+|----------------------------------------+-----------------+-------+--------+-------+---------|
+| mint                                   | 68070           | 68070 | 68070  | 68070 | 5       |
+|----------------------------------------+-----------------+-------+--------+-------+---------|
+| totalSupply                            | 2340            | 2340  | 2340   | 2340  | 11      |
+╰----------------------------------------+-----------------+-------+--------+-------+---------╯
+
+╭---------------------------------------------------------------------+-----------------+-------+--------+-------+---------╮
+| test/CrossChainBridge_POC.t.sol:CrossChainBridgePOCHarness Contract |                 |       |        |       |         |
++==========================================================================================================================+
+| Deployment Cost                                                     | Deployment Size |       |        |       |         |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| 1217392                                                             | 5517            |       |        |       |         |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+|                                                                     |                 |       |        |       |         |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| Function Name                                                       | Min             | Avg   | Median | Max   | # Calls |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| bridgeActive                                                        | 2371            | 2371  | 2371   | 2371  | 10      |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| failedMessages                                                      | 3243            | 3243  | 3243   | 3243  | 1       |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| injectFailedMessage                                                 | 45858           | 45858 | 45858  | 45858 | 6       |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| retryMessage                                                        | 67507           | 72068 | 67507  | 81196 | 6       |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| sendOhm                                                             | 24167           | 24167 | 24167  | 24167 | 1       |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| setBridgeStatus                                                     | 29748           | 29748 | 29748  | 29748 | 3       |
+|---------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| setTrustedRemote                                                    | 91721           | 91721 | 91721  | 91721 | 5       |
+╰---------------------------------------------------------------------+-----------------+-------+--------+-------+---------╯
+
+╭--------------------------------------------------------------------+-----------------+-------+--------+-------+---------╮
+| test/CrossChainBridge_POC.t.sol:CrossChainBridgePOC_FIXED Contract |                 |       |        |       |         |
++=========================================================================================================================+
+| Deployment Cost                                                    | Deployment Size |       |        |       |         |
+|--------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| 1226533                                                            | 5563            |       |        |       |         |
+|--------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+|                                                                    |                 |       |        |       |         |
+|--------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| Function Name                                                      | Min             | Avg   | Median | Max   | # Calls |
+|--------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| bridgeActive                                                       | 2371            | 2371  | 2371   | 2371  | 1       |
+|--------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| injectFailedMessage                                                | 45858           | 45858 | 45858  | 45858 | 1       |
+|--------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| retryMessage                                                       | 32144           | 32144 | 32144  | 32144 | 1       |
+|--------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| setBridgeStatus                                                    | 29748           | 29748 | 29748  | 29748 | 1       |
+|--------------------------------------------------------------------+-----------------+-------+--------+-------+---------|
+| setTrustedRemote                                                   | 91721           | 91721 | 91721  | 91721 | 1       |
+╰--------------------------------------------------------------------+-----------------+-------+--------+-------+---------╯
+
+
+Ran 1 test suite in 5.37ms (2.17ms CPU time): 5 tests passed, 0 failed, 0 skipped (5 total tests)
