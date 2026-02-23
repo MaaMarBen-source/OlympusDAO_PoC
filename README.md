@@ -1,23 +1,23 @@
-# OlympusDAO CrossChainBridge PoC 🚨
+# OlympusDAO CrossChainBridge PoC
 
-**Security PoC** – reproduces a critical vulnerability in OlympusDAO V3 `CrossChainBridge.sol`.
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]
+[![Solidity](https://img.shields.io/badge/solidity-^0.8.15-blue)]
+[![Foundry](https://img.shields.io/badge/foundry-latest-orange)]
 
-The bug allows **unauthorized minting of OHM** via `retryMessage()` even when `bridgeActive = false`.
+**Security PoC** – demonstrates unauthorized OHM mint bypass in OlympusDAO V3 `CrossChainBridge.sol`.
 
 ---
 
 ## Repository
 
-
-CrossChainBridgePOC.sol # Vulnerable bridge
-CrossChainBridge_POC.t.sol # Tests & exploit demo
-MockContracts.sol # Mock OHM, MINTR & LayerZero
-test_results.txt # Test output
-
+- `CrossChainBridgePOC.sol`       : Vulnerable bridge
+- `CrossChainBridge_POC.t.sol`    : Test suite & exploit demo
+- `MockContracts.sol`             : Mock OHM, MINTR & LayerZero
+- `test_results.txt`              : Test output
 
 ---
 
-## Setup
+##  Setup
 
 - Solidity ^0.8.15  
 - Foundry: [https://github.com/foundry-rs/foundry](https://github.com/foundry-rs/foundry)  
@@ -28,22 +28,22 @@ foundryup
 git clone https://github.com/MaaMarBen-source/OlympusDAO_PoC.git
 cd OlympusDAO_PoC
 forge test -vvv
-Vulnerability
+** Vulnerability
 
 _receiveMessage() & retryMessage() ignore bridgeActive
 
-Impact: Unauthorized minting, emergency shutdown bypassed, treasury dilution
+Impact: Unauthorized OHM minting, emergency shutdown bypassed, treasury dilution
 
-Attack vectors: retryMessage() (public), lzReceive() (endpoint compromised)
+Attack vectors: retryMessage() (public), lzReceive() (if endpoint compromised)
 
-Mitigation
+**** Mitigation
 function _receiveMessage(...) internal override {
     if (!bridgeActive) revert Bridge_Deactivated();
 }
 
 Ensures all inbound messages respect the emergency shutdown.
 
-Disclaimer
+***** Disclaimer *****
 
 For research & educational purposes only. Do not use on mainnet or with real funds.
 
