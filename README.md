@@ -1,125 +1,94 @@
-OlympusDAO CrossChainBridge PoC
+OlympusDAO CrossChainBridge Zero-Day PoC
 
+This repository contains a reproducible Proof-of-Concept (PoC) for a critical vulnerability in the OlympusDAO V3 CrossChainBridge contract.
 
+🚨 Vulnerability Overview
 
+The CrossChainBridge contract fails to enforce the bridgeActive shutdown invariant on inbound message execution paths, specifically within the retryMessage() and _receiveMessage() functions. This allows an attacker to mint OHM tokens even after governance has activated the emergency shutdown mechanism.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Security PoC – demonstrates unauthorized OHM mint bypass in OlympusDAO V3 CrossChainBridge.sol.
-
-
-
-
-1. Security Property Broken (Local Supply Immutability)
-
-The Emergency Halt mechanism must guarantee that the local contract cannot issue new tokens once deactivated, regardless of the internal state of previously authorized messages or the cross-chain message lifecycle.
-
-Result: VIOLATED. The bridgeActive = false flag fails to freeze the local supply for messages stored in the replay queue (failedMessages).
-
-2. Reachability Analysis: Permissionless Exploitation
-
-Insertion into failedMessages is not a privileged condition but an expected operational outcome of cross-chain delivery. Because destination execution depends on arbitrary receiver logic, any unprivileged actor can intentionally trigger execution failure, thereby creating a persistent mint authorization surviving emergency shutdown.
-
-Permissionless Causality Chain:
-
-1.
-Unprivileged user deploys a malicious receiver contract (e.g., one that reverts intentionally).
-
-2.
-Bridge delivers a valid message to this receiver.
-
-3.
-Execution fails (controlled revert or gas limit), and the message is stored in failedMessages.
-
-4.
-Governance activates shutdown (bridgeActive = false).
-
-5.
-User executes retryMessage() permissionlessly to mint tokens despite the shutdown.
-
-3. Economic Impact & Extraction Mechanism
-
-Because retryMessage is permissionless, any external actor can execute pending mint authorizations after shutdown and immediately realize economic value without requiring privileged access.
-
-Extraction Mechanism: Newly minted OHM tokens are immediately transferable and can be swapped against existing liquidity pools (e.g., Uniswap, Curve). This converts a protocol-authorized but unstoppable mint into externally realizable value, leading to a direct drain of liquidity and treasury backing. Once minted, OHM tokens are indistinguishable from legitimately bridged supply and cannot be revoked or programmatically clawed back.
-
-
-
-
-Repository Structure
+Key Findings
 
 •
-CrossChainBridgePOC.sol : Vulnerable bridge implementation
+Emergency Shutdown Bypass: Governance safety controls (bridgeActive = false) are ignored for pending messages in the retry queue.
 
 •
-CrossChainBridge_POC.t.sol : Test suite & exploit demo (Test 8: Reachability)
+Permissionless Minting: The retryMessage() function is public and permissionless, allowing any actor to trigger the minting logic.
 
 •
-MockContracts.sol : Mock OHM, MINTR & LayerZero Endpoint
+Reachability: Any user can intentionally cause cross-chain message failures to populate the failedMessages queue, creating a persistent mint authorization that survives a protocol shutdown.
+
+🛠 Setup & Reproduction
+
+Prerequisites
 
 •
-test_results.txt : Detailed test output & traces
+Foundry installed.
 
-
-
-
-Setup & Execution
-
-•
-Solidity ^0.8.15
-
-•
-Foundry: https://github.com/foundry-rs/foundry
+Execution
 
 Bash
 
 
-# Install Foundry
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
-
-# Clone and Test
+# Clone the repository
 git clone https://github.com/MaaMarBen-source/OlympusDAO_PoC.git
 cd OlympusDAO_PoC
+
+# Install dependencies (forge-std )
+forge install
+
+# Run the exploit tests
 forge test -vvv
 
 
 
-Mitigation
+Expected Output
 
-The shutdown check must be enforced at the final mint execution boundary, not only at user-facing entrypoints.
+The test suite demonstrates the following:
+
+1.
+Test 2: Confirms OHM can be minted via retryMessage while bridgeActive is false.
+
+2.
+Test 8: Demonstrates that a malicious receiver can permissionlessly force messages into the failedMessages queue.
+
+📈 Economic Impact Analysis
+
+The impact is classified as Critical due to the potential for unbacked token creation and treasury dilution.
+
+Metric
+Current Value (Est.)
+Impact (1M OHM Mint)
+OHM Price
+~$17.12
+-
+Circulating Supply
+~15.6M OHM
++6.39% Dilution
+Realizable Value
+-
+~$17.12M USD
+
+
+
+
+Anti-Downgrade Arguments:
+
+•
+No Global Supply Conservation: The burn on the source chain corresponds to a failed transfer. The subsequent mint after shutdown represents a new supply creation that governance intended to prevent.
+
+•
+Not a Design Choice: No audit (OtterSec) or documentation (OIP-138) mentions a deliberate bypass of shutdown for retries. The omission is a security flaw, not a feature.
+
+🛡 Mitigation
+
+Add a bridgeActive check at the final execution boundary in _receiveMessage:
 
 Plain Text
 
 
-function _receiveMessage(... ) internal virtual {
-    // ATOMIC MITIGATION: Guarantees local supply immutability
+function _receiveMessage(...) internal virtual {
     if (!bridgeActive) revert Bridge_Deactivated();
-    
-    // ... mint logic
+    // ... existing mint logic
 }
 
 
@@ -127,9 +96,6 @@ function _receiveMessage(... ) internal virtual {
 
 
 
-Disclaimer
-
-For research & educational purposes only. Do not use on mainnet or with real funds.
-
-Author: MaaMarBen – OlympusDAO V3 CrossChainBridge PoC
+Author: MaaMarBen
+Disclaimer: This PoC is for security research purposes only.
 
